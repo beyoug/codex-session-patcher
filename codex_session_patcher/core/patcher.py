@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-会话清理逻辑
+会话清理逻辑 — 支持 Codex CLI 和 Claude Code 两种格式
 """
 
 import json
@@ -10,14 +10,14 @@ from dataclasses import dataclass
 
 from .constants import MOCK_RESPONSE
 from .detector import RefusalDetector
-from .parser import get_assistant_messages, get_reasoning_items, extract_text_content, update_text_content
+from .formats import SessionFormat, get_format_strategy
 
 
 @dataclass
 class ChangeDetail:
     """修改详情"""
     line_num: int
-    change_type: str  # 'replace' 或 'delete'
+    change_type: str  # 'replace', 'delete', 'remove_thinking'
     original_content: Optional[str] = None
     new_content: Optional[str] = None
 
@@ -26,7 +26,8 @@ def clean_session_jsonl(
     lines: List[Dict[str, Any]],
     detector: RefusalDetector,
     show_content: bool = False,
-    mock_response: str = None,
+    mock_response: Optional[str] = None,
+    session_format: SessionFormat = SessionFormat.CODEX,
 ) -> Tuple[List[Dict[str, Any]], bool, List[ChangeDetail]]:
     """
     清洗 JSONL 会话数据
@@ -35,6 +36,8 @@ def clean_session_jsonl(
         lines: JSONL 行列表
         detector: 拒绝检测器
         show_content: 是否返回详细内容
+        mock_response: 替换文本
+        session_format: 会话格式
 
     Returns:
         (清洗后的行列表, 是否进行了修改, 修改详情列表)
@@ -42,19 +45,16 @@ def clean_session_jsonl(
     modified = False
     changes = []
 
-    # 获取所有助手消息
-    assistant_msgs = get_assistant_messages(lines)
-
-    if not assistant_msgs:
-        return lines, False, []
-
     if mock_response is None:
         mock_response = MOCK_RESPONSE
 
-    # 处理所有拒绝的助手消息
+    strategy = get_format_strategy(session_format)
+
+    # 1. 替换拒绝的助手消息
+    assistant_msgs = strategy.get_assistant_messages(lines)
     for msg_idx, msg in assistant_msgs:
-        content = extract_text_content(msg)
-        if detector.detect(content):
+        content = strategy.extract_text_content(msg)
+        if content and detector.detect(content):
             change = ChangeDetail(
                 line_num=msg_idx + 1,
                 change_type='replace'
@@ -64,14 +64,14 @@ def clean_session_jsonl(
                 change.new_content = mock_response
             changes.append(change)
 
-            updated_msg = update_text_content(msg, mock_response)
+            updated_msg = strategy.update_text_content(msg, mock_response)
             lines[msg_idx] = updated_msg
             modified = True
 
-    # 删除推理内容
-    reasoning_items = get_reasoning_items(lines)
-    if reasoning_items:
-        for idx, _ in reasoning_items:
+    # 2. 删除独立的 thinking/reasoning 行（Codex 格式）
+    thinking_items = strategy.get_thinking_items(lines)
+    if thinking_items:
+        for idx, item in thinking_items:
             change = ChangeDetail(
                 line_num=idx + 1,
                 change_type='delete'
@@ -88,23 +88,33 @@ def clean_session_jsonl(
                     content_preview = '推理内容'
                 change.original_content = content_preview + ('...' if len(content_preview) >= 100 else '')
             changes.append(change)
-            lines[idx] = None  # 标记删除
+            lines[idx] = None
             modified = True
 
-    # 过滤掉 None 的行
+    # 3. 移除嵌入在消息 content[] 中的 thinking 块（Claude Code 格式）
+    for idx, line in enumerate(lines):
+        if line is None:
+            continue
+        updated, removed_count = strategy.remove_thinking_from_message(line)
+        if removed_count > 0:
+            change = ChangeDetail(
+                line_num=idx + 1,
+                change_type='remove_thinking'
+            )
+            if show_content:
+                change.original_content = f'移除 {removed_count} 个 thinking block'
+            changes.append(change)
+            lines[idx] = updated
+            modified = True
+
+    # 4. 过滤掉标记为 None 的行
     lines = [line for line in lines if line is not None]
 
     return lines, modified, changes
 
 
 def save_session_jsonl(lines: List[Dict[str, Any]], file_path: str) -> None:
-    """
-    保存 JSONL 会话数据
-
-    Args:
-        lines: JSONL 行列表
-        file_path: 目标文件路径
-    """
+    """保存 JSONL 会话数据"""
     try:
         with open(file_path, 'w', encoding='utf-8') as f:
             for line in lines:

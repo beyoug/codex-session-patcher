@@ -1,34 +1,16 @@
 <template>
-  <n-drawer v-model:show="show" :width="420" placement="right">
-    <n-drawer-content title="设置" closable>
-      <n-space vertical size="large">
-        <!-- 基础清理配置 -->
-        <div class="settings-section">
-          <div class="section-title">基础清理</div>
-          <div class="section-desc">未启用 AI 时，检测到拒绝回复将替换为以下固定文本</div>
+  <div class="settings-panel">
+    <n-space vertical size="large">
+      <!-- AI 配置 -->
+      <n-card title="AI 配置" size="small">
+        <template #header-extra>
+          <n-tag :type="settingsStore.aiEnabled ? 'success' : 'default'" size="small">
+            {{ settingsStore.aiEnabled ? '已启用' : '未启用' }}
+          </n-tag>
+        </template>
 
-          <n-form-item label="默认替换文本">
-            <n-input
-              v-model:value="settingsStore.mockResponse"
-              type="textarea"
-              :rows="3"
-              placeholder="替换拒绝内容后的回复文本"
-              @update:value="settingsStore.markChanged"
-            />
-          </n-form-item>
-        </div>
-
-        <!-- AI 智能改写 -->
-        <div class="settings-section">
-          <div class="section-title">
-            AI 智能改写
-            <n-tag size="small" :type="settingsStore.aiEnabled ? 'success' : 'default'" style="margin-left: 8px">
-              {{ settingsStore.aiEnabled ? '已启用' : '未启用' }}
-            </n-tag>
-          </div>
-          <div class="section-desc">启用后，AI 将根据对话上下文生成自然的配合性回复，替代固定文本</div>
-
-          <n-form-item label="启用 AI 改写">
+        <n-space vertical>
+          <n-form-item label="启用 AI">
             <n-switch
               v-model:value="settingsStore.aiEnabled"
               @update:value="settingsStore.markChanged"
@@ -68,13 +50,34 @@
               />
             </n-form-item>
           </n-collapse-transition>
-        </div>
 
-        <!-- 拒绝检测配置 -->
-        <div class="settings-section">
-          <div class="section-title">拒绝检测</div>
-          <div class="section-desc">以下关键词用于检测 AI 的拒绝回复</div>
+          <n-alert type="info" :bordered="false">
+            AI 用于「提示词改写」和「会话清理」时的智能回复生成
+          </n-alert>
+        </n-space>
+      </n-card>
 
+      <!-- 会话清理配置 -->
+      <n-card title="会话清理" size="small">
+        <n-space vertical>
+          <n-form-item label="默认替换文本">
+            <n-input
+              v-model:value="settingsStore.mockResponse"
+              type="textarea"
+              :rows="3"
+              placeholder="检测到拒绝回复时，替换为此文本"
+              @update:value="settingsStore.markChanged"
+            />
+            <template #feedback>
+              <span class="form-hint">未启用 AI 时使用此固定文本替换拒绝内容</span>
+            </template>
+          </n-form-item>
+        </n-space>
+      </n-card>
+
+      <!-- 拒绝检测 -->
+      <n-card title="拒绝检测关键词" size="small">
+        <n-space vertical>
           <n-form-item label="内置中文关键词">
             <div class="builtin-keywords">
               <n-tag v-for="kw in builtinZhKeywords" :key="kw" size="small" type="info" :bordered="false">{{ kw }}</n-tag>
@@ -89,58 +92,45 @@
 
           <n-form-item label="自定义中文关键词">
             <n-dynamic-tags
-              v-model:value="zhKeywords"
+              :value="zhKeywords"
               @update:value="handleKeywordsChange('zh', $event)"
             />
           </n-form-item>
 
           <n-form-item label="自定义英文关键词">
             <n-dynamic-tags
-              v-model:value="enKeywords"
+              :value="enKeywords"
               @update:value="handleKeywordsChange('en', $event)"
             />
           </n-form-item>
-        </div>
-      </n-space>
-
-      <template #footer>
-        <n-space>
-          <n-button @click="handleReset">重置</n-button>
-          <n-button
-            type="primary"
-            :disabled="!settingsStore.changed"
-            :loading="settingsStore.loading"
-            @click="handleSave"
-          >
-            保存
-          </n-button>
         </n-space>
-      </template>
-    </n-drawer-content>
-  </n-drawer>
+      </n-card>
+
+      <!-- 保存按钮 -->
+      <n-space justify="end">
+        <n-button @click="handleReset">重置</n-button>
+        <n-button
+          type="primary"
+          :disabled="!settingsStore.changed"
+          :loading="settingsStore.loading"
+          @click="handleSave"
+        >
+          保存
+        </n-button>
+      </n-space>
+    </n-space>
+  </div>
 </template>
 
 <script setup>
-import { computed, watch } from 'vue'
+import { computed } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useSettingsStore } from '../stores/settingsStore'
-
-const props = defineProps({
-  show: Boolean
-})
-
-const emit = defineEmits(['update:show'])
 
 const message = useMessage()
 const settingsStore = useSettingsStore()
 
-// 双向绑定
-const show = computed({
-  get: () => props.show,
-  set: (val) => emit('update:show', val)
-})
-
-// 内置关键词（只读展示）
+// 内置关键词
 const builtinZhKeywords = [
   '抱歉', '无法', '违反', '不能', '拒绝', '不允许', '禁止',
   '很抱歉', '对不起', '不好意思', '我无法', '我不能'
@@ -152,28 +142,14 @@ const builtinEnKeywords = [
   'I apologize', 'not permitted', 'not allowed'
 ]
 
-// 自定义关键词数组
-const zhKeywords = computed({
-  get: () => settingsStore.customKeywords.zh || [],
-  set: () => {}
-})
-
-const enKeywords = computed({
-  get: () => settingsStore.customKeywords.en || [],
-  set: () => {}
-})
+// 自定义关键词
+const zhKeywords = computed(() => settingsStore.customKeywords.zh || [])
+const enKeywords = computed(() => settingsStore.customKeywords.en || [])
 
 function handleKeywordsChange(lang, value) {
   settingsStore.customKeywords[lang] = value
   settingsStore.markChanged()
 }
-
-// 打开抽屉时加载设置
-watch(show, (val) => {
-  if (val) {
-    settingsStore.loadSettings()
-  }
-})
 
 async function handleSave() {
   try {
@@ -191,29 +167,13 @@ function handleReset() {
 </script>
 
 <style scoped>
-.settings-section {
-  padding: 16px 0;
-  border-bottom: 1px solid #3a3a3a;
+.settings-panel {
+  max-width: 800px;
+  margin: 0 auto;
 }
 
-.settings-section:last-child {
-  border-bottom: none;
-}
-
-.section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
-  margin-bottom: 4px;
-  display: flex;
-  align-items: center;
-}
-
-.section-desc {
-  font-size: 12px;
-  color: #888;
-  margin-bottom: 16px;
-  line-height: 1.5;
+.n-card {
+  background: var(--color-bg-1);
 }
 
 .form-hint {

@@ -34,8 +34,8 @@
 
       <!-- 修改预览 Tab -->
       <div v-show="activeTab === 'changes'" class="preview-scrollbar">
-        <!-- 无拒绝回复但有序推理内容 -->
-        <div v-if="!preview.has_changes && preview.reasoning_count > 0" class="empty-content">
+        <!-- 无拒绝回复但有推理/thinking内容 -->
+        <div v-if="!preview.has_changes && (preview.reasoning_count > 0 || preview.thinking_count > 0)" class="empty-content">
           <n-empty type="info">
             <template #icon>
               <n-icon size="48" color="#2080f0">
@@ -45,7 +45,8 @@
             <template #description>
               <div class="reasoning-info">
                 <p>当前会话无拒绝回复</p>
-                <p>执行清理时将删除 <strong>{{ preview.reasoning_count }}</strong> 条推理内容</p>
+                <p v-if="preview.reasoning_count > 0">执行清理时将删除 <strong>{{ preview.reasoning_count }}</strong> 条推理内容</p>
+                <p v-if="preview.thinking_count > 0">执行清理时将移除 <strong>{{ preview.thinking_count }}</strong> 个 Thinking Block</p>
               </div>
             </template>
           </n-empty>
@@ -69,6 +70,12 @@
             <span>执行清理时还将删除 {{ preview.reasoning_count }} 条推理内容</span>
           </div>
 
+          <!-- Thinking Block 提示 -->
+          <div v-if="preview.thinking_count > 0" class="thinking-banner">
+            <n-icon><InformationCircleOutline /></n-icon>
+            <span>执行清理时还将移除 {{ preview.thinking_count }} 个 Thinking Block（无效签名）</span>
+          </div>
+
           <div class="changes-list">
             <div
               v-for="(change, index) in preview.changes"
@@ -77,10 +84,10 @@
             >
               <div class="change-header">
                 <n-tag
-                  :type="change.type === 'replace' ? 'warning' : 'error'"
+                  :type="changeTagType(change.type)"
                   size="small"
                 >
-                  {{ change.type === 'replace' ? '替换' : '删除' }}
+                  {{ changeTagLabel(change.type) }}
                 </n-tag>
                 <span class="line-num">第 {{ change.line_num }} 行</span>
               </div>
@@ -101,6 +108,13 @@
                     <n-tag v-if="change._ai_generated" size="small" type="success" style="margin-left: 6px">AI 生成</n-tag>
                   </div>
                   <pre>{{ change.replacement }}</pre>
+                </div>
+              </div>
+
+              <div v-else-if="change.type === 'remove_thinking'" class="change-content">
+                <div class="content-block thinking">
+                  <div class="content-label">移除 Thinking Block</div>
+                  <pre>{{ change.content || '(Thinking block with invalid signature)' }}</pre>
                 </div>
               </div>
 
@@ -155,6 +169,13 @@
               <pre class="diff-text">{{ change.content || '推理内容' }}</pre>
             </div>
 
+            <!-- 移除 Thinking Block -->
+            <div v-else-if="change.type === 'remove_thinking'" class="diff-line thinking-removed">
+              <span class="line-number">{{ change.line_num }}</span>
+              <span class="diff-marker">~</span>
+              <pre class="diff-text">{{ change.content || '[Thinking Block removed]' }}</pre>
+            </div>
+
             <!-- 替换：显示删除和新增 -->
             <template v-else-if="change.type === 'replace'">
               <div class="diff-line deleted">
@@ -196,6 +217,18 @@ const activeTab = ref('changes')
 
 const session = computed(() => sessionStore.getSelectedSession())
 const preview = computed(() => sessionStore.preview)
+
+function changeTagType(type) {
+  if (type === 'replace') return 'warning'
+  if (type === 'remove_thinking') return 'info'
+  return 'error'
+}
+
+function changeTagLabel(type) {
+  if (type === 'replace') return '替换'
+  if (type === 'remove_thinking') return '移除 Thinking'
+  return '删除'
+}
 
 // 已清理会话（有备份）默认显示 Diff 视图
 watch(() => sessionStore.selectedId, () => {
@@ -423,6 +456,34 @@ watch(() => sessionStore.selectedId, () => {
   margin-bottom: 16px;
   font-size: 13px;
   color: var(--color-text-2, #ccc);
+}
+
+/* Thinking Block 内容块 */
+.content-block.thinking {
+  background: #2d2d3d;
+  border-left: 3px solid #7b68ee;
+}
+
+/* Thinking Block 提示 */
+.thinking-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(123, 104, 238, 0.15);
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--color-text-2, #ccc);
+}
+
+/* Diff 视图 Thinking Block 移除 */
+.diff-line.thinking-removed {
+  background: rgba(123, 104, 238, 0.15);
+}
+
+.diff-line.thinking-removed .diff-marker {
+  color: #7b68ee;
 }
 
 /* 推理内容提示 */

@@ -95,8 +95,8 @@ async function request(path, options = {}) {
 }
 
 // 获取会话列表
-export async function getSessions(skipCheck = false) {
-  return request(`/sessions?skip_check=${skipCheck}`)
+export async function getSessions(skipCheck = false, format = 'auto') {
+  return request(`/sessions?skip_check=${skipCheck}&format=${format}`)
 }
 
 // 获取单个会话
@@ -148,4 +148,18 @@ export async function updateSettings(settings) {
     method: 'PUT',
     body: JSON.stringify(settings)
   })
+}
+
+// 导出 api 对象（用于 CTF Store 等）
+export const api = {
+  get: (path) => request(path),
+  post: (path, data) => request(path, {
+    method: 'POST',
+    body: data ? JSON.stringify(data) : undefined
+  }),
+  put: (path, data) => request(path, {
+    method: 'PUT',
+    body: data ? JSON.stringify(data) : undefined
+  }),
+  delete: (path) => request(path, { method: 'DELETE' })
 }

@@ -13,6 +13,8 @@ import httpx
 from .schemas import AIRewriteResponse, AIRewriteItem, Settings
 from codex_session_patcher.core import (
     RefusalDetector,
+    SessionFormat,
+    get_format_strategy,
     extract_text_content,
     get_assistant_messages,
 )
@@ -43,34 +45,53 @@ def extract_conversation_context(
     parsed_lines: list[dict],
     refusal_index: int,
     max_messages: int = 5,
+    session_format: SessionFormat = SessionFormat.CODEX,
 ) -> list[dict]:
     """从拒绝消息位置向前提取对话上下文"""
+    strategy = get_format_strategy(session_format)
     context = []
-    for idx in range(refusal_index - 1, -1, -1):
-        if len(context) >= max_messages:
-            break
-        line = parsed_lines[idx]
-        if line.get('type') != 'response_item':
-            continue
-        payload = line.get('payload', {})
-        if payload.get('type') != 'message':
-            continue
-        role = payload.get('role')
-        if role == 'user':
-            content = _extract_user_content(payload)
-            if content:
-                context.append({'role': 'user', 'content': content[:2000]})
-        elif role == 'assistant':
-            content = extract_text_content(line)
-            if content:
-                context.append({'role': 'assistant', 'content': content[:2000]})
+
+    if session_format == SessionFormat.CODEX:
+        for idx in range(refusal_index - 1, -1, -1):
+            if len(context) >= max_messages:
+                break
+            line = parsed_lines[idx]
+            if line.get('type') != 'response_item':
+                continue
+            payload = line.get('payload', {})
+            if payload.get('type') != 'message':
+                continue
+            role = payload.get('role')
+            if role == 'user':
+                content = _extract_user_content_codex(payload)
+                if content:
+                    context.append({'role': 'user', 'content': content[:2000]})
+            elif role == 'assistant':
+                content = extract_text_content(line)
+                if content:
+                    context.append({'role': 'assistant', 'content': content[:2000]})
+    else:
+        # Claude Code 格式
+        for idx in range(refusal_index - 1, -1, -1):
+            if len(context) >= max_messages:
+                break
+            line = parsed_lines[idx]
+            line_type = line.get('type', '')
+            if line_type == 'user':
+                content = _extract_user_content_claude(line)
+                if content:
+                    context.append({'role': 'user', 'content': content[:2000]})
+            elif line_type == 'assistant':
+                content = strategy.extract_text_content(line)
+                if content:
+                    context.append({'role': 'assistant', 'content': content[:2000]})
 
     context.reverse()
     return context
 
 
-def _extract_user_content(payload: dict) -> str:
-    """提取用户消息的文本内容"""
+def _extract_user_content_codex(payload: dict) -> str:
+    """提取 Codex 用户消息的文本内容"""
     content = payload.get('content', [])
     if isinstance(content, str):
         return content
@@ -81,6 +102,24 @@ def _extract_user_content(payload: dict) -> str:
                 text = item.get('text', '') or item.get('input_text', '')
                 if text:
                     texts.append(text)
+        return '\n'.join(texts)
+    return ''
+
+
+def _extract_user_content_claude(line: dict) -> str:
+    """提取 Claude Code 用户消息的文本内容"""
+    message = line.get('message', {})
+    content = message.get('content', '')
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        texts = []
+        for item in content:
+            if isinstance(item, dict):
+                if item.get('type') == 'text':
+                    texts.append(item.get('text', ''))
+                elif item.get('type') == 'tool_result':
+                    texts.append(str(item.get('content', ''))[:200])
         return '\n'.join(texts)
     return ''
 
@@ -156,9 +195,11 @@ async def generate_ai_rewrite(
     file_path: str,
     settings: Settings,
     custom_keywords: Optional[dict] = None,
+    session_format: SessionFormat = SessionFormat.CODEX,
 ) -> AIRewriteResponse:
     """生成 AI 改写内容 - 处理所有拒绝消息"""
     detector = RefusalDetector(custom_keywords)
+    strategy = get_format_strategy(session_format)
 
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
@@ -177,14 +218,14 @@ async def generate_ai_rewrite(
             continue
 
     # 找到所有拒绝的助手消息
-    assistant_msgs = get_assistant_messages(parsed_lines)
+    assistant_msgs = strategy.get_assistant_messages(parsed_lines)
     if not assistant_msgs:
         return AIRewriteResponse(success=False, error='未找到助手消息')
 
     refusal_msgs = []
     for idx, msg in assistant_msgs:
-        content = extract_text_content(msg)
-        if detector.detect(content):
+        content = strategy.extract_text_content(msg)
+        if content and detector.detect(content):
             refusal_msgs.append((idx, msg, content))
 
     if not refusal_msgs:
@@ -193,7 +234,7 @@ async def generate_ai_rewrite(
     # 逐条生成改写
     items = []
     for idx, msg, content in refusal_msgs:
-        context = extract_conversation_context(parsed_lines, idx)
+        context = extract_conversation_context(parsed_lines, idx, session_format=session_format)
         messages = build_rewrite_prompt(context, content)
         try:
             replacement = await call_llm(settings, messages)

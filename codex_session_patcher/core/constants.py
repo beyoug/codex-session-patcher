@@ -28,3 +28,9 @@ REASONING_TYPES = ["reasoning", "thought", "thinking", "thoughts", "reasoning_co
 
 # 备份保留数量
 BACKUP_KEEP_COUNT = 5
+
+# Claude Code 默认会话目录
+DEFAULT_CLAUDE_CODE_SESSION_DIR = "~/.claude/projects/"
+
+# Claude Code 中跳过处理的行类型
+CLAUDE_CODE_SKIP_TYPES = {"file-history-snapshot", "last-prompt", "system"}

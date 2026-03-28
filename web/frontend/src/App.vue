@@ -20,18 +20,38 @@
             </n-icon>
             <span class="title">Codex Session Patcher</span>
           </div>
-          <div class="header-right">
-            <n-button quaternary @click="showSettings = true">
-              <template #icon>
-                <n-icon><SettingsOutline /></n-icon>
-              </template>
-              设置
-            </n-button>
-          </div>
         </n-layout-header>
 
+        <!-- Tab 导航 -->
+        <n-tabs v-model:value="activeTab" type="line" class="main-tabs" @update:value="handleTabChange">
+          <n-tab name="sessions">
+            <template #icon>
+              <n-icon><ListOutline /></n-icon>
+            </template>
+            会话管理
+          </n-tab>
+          <n-tab name="enhance">
+            <template #icon>
+              <n-icon><SparklesOutline /></n-icon>
+            </template>
+            提示词增强
+          </n-tab>
+          <n-tab name="settings">
+            <template #icon>
+              <n-icon><SettingsOutline /></n-icon>
+            </template>
+            设置
+          </n-tab>
+          <n-tab name="help">
+            <template #icon>
+              <n-icon><HelpCircleOutline /></n-icon>
+            </template>
+            帮助
+          </n-tab>
+        </n-tabs>
+
         <!-- 主内容区 -->
-        <n-layout has-sider class="app-content">
+        <n-layout has-sider class="app-content" v-show="activeTab === 'sessions'">
           <!-- 左侧会话列表 -->
           <n-layout-sider
             bordered
@@ -61,11 +81,15 @@
           </n-layout-content>
         </n-layout>
 
+        <!-- 其他 Tab 内容 -->
+        <n-layout-content v-show="activeTab !== 'sessions'" class="tab-content">
+          <PromptEnhancePanel v-if="activeTab === 'enhance'" />
+          <SettingsPanel v-if="activeTab === 'settings'" />
+          <HelpPanel v-if="activeTab === 'help'" />
+        </n-layout-content>
+
         <!-- 底部日志面板 -->
         <LogPanel />
-
-        <!-- 设置抽屉 -->
-        <SettingsDrawer v-model:show="showSettings" />
       </n-layout>
     </n-dialog-provider>
     </n-message-provider>
@@ -75,17 +99,19 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { darkTheme, zhCN, dateZhCN, NDialogProvider } from 'naive-ui'
-import { CodeSlash, SettingsOutline, MenuOutline } from '@vicons/ionicons5'
+import { CodeSlash, SettingsOutline, MenuOutline, ListOutline, SparklesOutline, HelpCircleOutline } from '@vicons/ionicons5'
 import SessionList from './components/SessionList.vue'
 import PreviewPanel from './components/PreviewPanel.vue'
 import ActionBar from './components/ActionBar.vue'
 import LogPanel from './components/LogPanel.vue'
-import SettingsDrawer from './components/SettingsDrawer.vue'
+import PromptEnhancePanel from './components/PromptEnhancePanel.vue'
+import SettingsPanel from './components/SettingsPanel.vue'
+import HelpPanel from './components/HelpPanel.vue'
 import { useSessionStore } from './stores/sessionStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useLogStore } from './stores/logStore'
 
-const showSettings = ref(false)
+const activeTab = ref('sessions')
 const sidebarCollapsed = ref(false)
 const isMobile = ref(false)
 const sessionStore = useSessionStore()
@@ -95,12 +121,12 @@ const logStore = useLogStore()
 // 初始化：加载会话列表
 sessionStore.fetchSessions()
 
-// 打开设置时加载配置
-watch(showSettings, (val) => {
-  if (val) {
+// Tab 切换时加载设置
+function handleTabChange(tab) {
+  if (tab === 'settings') {
     settingsStore.loadSettings()
   }
-})
+}
 
 // 响应式检测
 const checkMobile = () => {
@@ -204,10 +230,14 @@ onUnmounted(() => {
   color: var(--color-text-1);
 }
 
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.main-tabs {
+  padding: 0 16px;
+  background: var(--color-bg-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.main-tabs :deep(.n-tabs-nav) {
+  padding: 0;
 }
 
 .app-content {
@@ -231,6 +261,14 @@ onUnmounted(() => {
   background: var(--color-bg-2);
 }
 
+.tab-content {
+  flex: 1;
+  padding: 16px;
+  padding-bottom: 56px;
+  background: var(--color-bg-2);
+  overflow: auto;
+}
+
 /* 响应式布局 */
 @media (max-width: 1024px) {
   .menu-toggle {
@@ -239,7 +277,7 @@ onUnmounted(() => {
 
   .session-sider {
     position: fixed;
-    top: var(--header-height);
+    top: calc(var(--header-height) + 40px);
     left: 0;
     bottom: 0;
     z-index: 100;
@@ -249,7 +287,7 @@ onUnmounted(() => {
   .sidebar-overlay {
     display: block;
     position: fixed;
-    top: var(--header-height);
+    top: calc(var(--header-height) + 40px);
     left: 0;
     right: 0;
     bottom: 0;
@@ -259,12 +297,8 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
-  .main-content {
+  .main-content, .tab-content {
     padding: 12px;
-  }
-
-  .header-right .n-button__content span:last-child {
-    display: none;
   }
 }
 </style>

@@ -11,6 +11,16 @@
       </div>
     </div>
 
+    <!-- 格式切换 -->
+    <div class="format-switch">
+      <n-segmented
+        :value="sessionStore.activeFormat"
+        :options="formatOptions"
+        size="small"
+        @update:value="sessionStore.setFormat"
+      />
+    </div>
+
     <!-- 搜索框 -->
     <div class="search-box">
       <n-input
@@ -92,14 +102,25 @@
                 </div>
                 <div class="session-meta">
                   <n-tag
+                    v-if="session.format === 'claude_code'"
+                    size="small"
+                    :bordered="false"
+                    type="info"
+                  >CC</n-tag>
+                  <n-tag
+                    v-else
+                    size="small"
+                    :bordered="false"
+                  >CX</n-tag>
+                  <n-tag
                     v-if="session.has_refusal"
                     type="error"
                     size="small"
                   >
-                    🚫 {{ session.refusal_count }}
+                    {{ session.refusal_count }}
                   </n-tag>
                   <n-tag v-else type="success" size="small">
-                    ✅
+                    OK
                   </n-tag>
                   <n-tag
                     v-if="session.has_backup"
@@ -119,6 +140,10 @@
               </div>
 
               <div v-show="expandedIds.has(session.id)" class="session-detail">
+                <div v-if="session.project_path" class="detail-item">
+                  <span class="label">项目:</span>
+                  <span class="value" :title="session.project_path">{{ truncate(session.project_path, 30) }}</span>
+                </div>
                 <div class="detail-item">
                   <span class="label">文件名:</span>
                   <span class="value" :title="session.filename">{{ truncate(session.filename, 30) }}</span>
@@ -148,6 +173,12 @@ import { useSessionStore } from '../stores/sessionStore'
 const sessionStore = useSessionStore()
 const expandedIds = reactive(new Set())
 const expandedGroups = reactive(new Set(['今天', '昨天']))
+
+const formatOptions = [
+  { label: 'Auto', value: 'auto' },
+  { label: 'Codex', value: 'codex' },
+  { label: 'Claude Code', value: 'claude_code' },
+]
 const searchQuery = ref('')
 const filterMode = ref('refusal')  // 'all' | 'refusal' | 'clean' | 'patched'
 const loading = ref(false)
@@ -305,6 +336,12 @@ function formatTime(mtime) {
 .header-actions {
   display: flex;
   gap: 8px;
+}
+
+.format-switch {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border, #3a3a3a);
 }
 
 .search-box {

@@ -10,7 +10,7 @@
         <template #icon>
           <n-icon><TrashOutline /></n-icon>
         </template>
-        {{ hasRefusalOnly ? '执行清理' : '清理推理内容' }}
+        {{ hasRefusalOnly ? '执行清理' : hasThinkingOnly ? '清理 Thinking' : '清理推理内容' }}
       </n-button>
 
       <n-button
@@ -70,11 +70,16 @@ const lastResult = ref(null)
 
 const canPatch = computed(() => {
   const preview = sessionStore.preview
-  return sessionStore.selectedId && preview && (preview.has_changes || preview.reasoning_count > 0)
+  return sessionStore.selectedId && preview && (preview.has_changes || preview.reasoning_count > 0 || preview.thinking_count > 0)
 })
 
 const hasRefusalOnly = computed(() => {
   return sessionStore.preview?.has_changes === true
+})
+
+const hasThinkingOnly = computed(() => {
+  const preview = sessionStore.preview
+  return !preview?.has_changes && (preview?.thinking_count || 0) > 0
 })
 
 async function handlePatch() {
@@ -84,13 +89,17 @@ async function handlePatch() {
   const session = sessionStore.getSelectedSession()
   const changesCount = preview?.changes?.length || 0
   const reasoningCount = preview?.reasoning_count || 0
+  const thinkingCount = preview?.thinking_count || 0
 
-  // 根据是否有拒绝内容显示不同的确认对话框
-  if (!preview?.has_changes && reasoningCount > 0) {
-    // 无拒绝内容，只有推理内容
+  // 根据内容类型显示不同的确认对话框
+  if (!preview?.has_changes && (reasoningCount > 0 || thinkingCount > 0)) {
+    // 无拒绝内容，只有推理/thinking 内容
+    const details = []
+    if (reasoningCount > 0) details.push(`${reasoningCount} 条推理内容`)
+    if (thinkingCount > 0) details.push(`${thinkingCount} 个 Thinking Block`)
     dialog.info({
-      title: '确认清理推理内容',
-      content: `会话 "${session?.id || sessionStore.selectedId}" 未检测到拒绝回复。\n\n但包含 ${reasoningCount} 条加密推理内容，清理后将删除这些内容。\n\n备份将保存到原文件同目录，扩展名为 .bak\n\n是否继续？`,
+      title: '确认清理',
+      content: `会话 "${session?.id || sessionStore.selectedId}" 未检测到拒绝回复。\n\n但包含 ${details.join('、')}，清理后将删除这些内容。\n\n备份将保存到原文件同目录，扩展名为 .bak\n\n是否继续？`,
       positiveText: '确认清理',
       negativeText: '取消',
       onPositiveClick: () => {
@@ -99,9 +108,12 @@ async function handlePatch() {
     })
   } else {
     // 有拒绝内容
+    const detailLines = [`拒绝回复: ${changesCount} 处`]
+    if (reasoningCount > 0) detailLines.push(`推理内容: ${reasoningCount} 条`)
+    if (thinkingCount > 0) detailLines.push(`Thinking Block: ${thinkingCount} 个`)
     dialog.warning({
       title: '确认执行清理',
-      content: `即将清理会话 "${session?.id || sessionStore.selectedId}" 中的拒绝内容。\n\n拒绝回复: ${changesCount} 处\n推理内容: ${reasoningCount} 条\n\n备份将保存到原文件同目录，扩展名为 .bak\n\n此操作不可撤销，是否继续？`,
+      content: `即将清理会话 "${session?.id || sessionStore.selectedId}" 中的拒绝内容。\n\n${detailLines.join('\n')}\n\n备份将保存到原文件同目录，扩展名为 .bak\n\n此操作不可撤销，是否继续？`,
       positiveText: '确认执行',
       negativeText: '取消',
       onPositiveClick: () => {

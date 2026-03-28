@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-会话解析器
+会话解析器 — 支持 Codex CLI 和 Claude Code 两种 JSONL 格式
 """
 
 import os
@@ -8,9 +8,9 @@ import re
 import json
 from datetime import datetime
 from typing import Dict, List, Any, Tuple, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from .detector import RefusalDetector
+from .formats import SessionFormat, detect_session_format, decode_claude_project_path
 
 
 @dataclass
@@ -23,71 +23,126 @@ class SessionInfo:
     date: str
     session_id: str
     size: int
+    format: SessionFormat = SessionFormat.CODEX
+    project_path: Optional[str] = None  # Claude Code 专用：解码后的项目路径
 
 
 class SessionParser:
     """会话文件解析器 - 支持 JSONL 格式"""
 
-    def __init__(self, session_dir: str = "~/.codex/sessions/"):
+    DEFAULT_DIRS = {
+        SessionFormat.CODEX: "~/.codex/sessions/",
+        SessionFormat.CLAUDE_CODE: "~/.claude/projects/",
+    }
+
+    def __init__(self, session_dir: str = None, session_format: SessionFormat = None):
+        """
+        Args:
+            session_dir: 会话目录，为 None 时根据 session_format 使用默认值
+            session_format: 会话格式，为 None 时自动检测
+        """
+        if session_format is not None and session_dir is None:
+            session_dir = self.DEFAULT_DIRS.get(session_format, "~/.codex/sessions/")
+        elif session_dir is None:
+            session_dir = "~/.codex/sessions/"
+
         self.session_dir = os.path.expanduser(session_dir)
+        self.session_format = session_format
 
     def list_sessions(self) -> List[SessionInfo]:
-        """
-        列出所有会话文件
-
-        Returns:
-            会话信息列表，按修改时间降序排序
-        """
+        """列出所有会话文件，按修改时间降序排序"""
         if not os.path.exists(self.session_dir):
             return []
 
         sessions = []
-        # 递归搜索所有 .jsonl 文件
         for root, dirs, files in os.walk(self.session_dir):
             for f in files:
-                if f.endswith(".jsonl"):
-                    full_path = os.path.join(root, f)
-                    try:
-                        stat = os.stat(full_path)
-                        mtime = stat.st_mtime
-                        mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+                if not f.endswith(".jsonl"):
+                    continue
+                # 跳过备份文件
+                if f.endswith(".bak"):
+                    continue
+                full_path = os.path.join(root, f)
+                try:
+                    info = self._parse_session_file(full_path, f, root)
+                    if info:
+                        sessions.append(info)
+                except Exception:
+                    continue
 
-                        # 从文件名提取日期和 ID
-                        # 格式: rollout-2026-03-25T16-05-56-{uuid}.jsonl
-                        match = re.match(r'rollout-(\d{4}-\d{2}-\d{2})T[\d-]+-([a-f0-9-]+)\.jsonl', f)
-                        if match:
-                            date = match.group(1)
-                            session_id = match.group(2)[:8]  # 取前8位
-                        else:
-                            date = mtime_str[:10]
-                            session_id = f[:8]
-
-                        sessions.append(SessionInfo(
-                            path=full_path,
-                            filename=f,
-                            mtime=mtime,
-                            mtime_str=mtime_str,
-                            date=date,
-                            session_id=session_id,
-                            size=stat.st_size
-                        ))
-                    except Exception:
-                        continue
-
-        # 按修改时间降序排序
         sessions.sort(key=lambda x: x.mtime, reverse=True)
         return sessions
 
+    def _parse_session_file(self, full_path: str, filename: str, root: str) -> Optional[SessionInfo]:
+        """解析单个会话文件的元信息"""
+        stat = os.stat(full_path)
+        mtime = stat.st_mtime
+        mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+
+        # 根据格式决定解析方式
+        fmt = self.session_format
+        if fmt is None:
+            fmt = self._detect_format(full_path, root)
+
+        if fmt == SessionFormat.CODEX:
+            date, session_id = self._parse_codex_filename(filename, mtime_str)
+            project_path = None
+        else:
+            date, session_id = self._parse_claude_filename(filename, mtime_str)
+            project_path = self._extract_project_path(root)
+
+        return SessionInfo(
+            path=full_path,
+            filename=filename,
+            mtime=mtime,
+            mtime_str=mtime_str,
+            date=date,
+            session_id=session_id,
+            size=stat.st_size,
+            format=fmt,
+            project_path=project_path,
+        )
+
+    def _detect_format(self, full_path: str, root: str) -> SessionFormat:
+        """自动检测文件格式"""
+        codex_dir = os.path.expanduser("~/.codex/")
+        claude_dir = os.path.expanduser("~/.claude/")
+        if root.startswith(codex_dir):
+            return SessionFormat.CODEX
+        if root.startswith(claude_dir):
+            return SessionFormat.CLAUDE_CODE
+        # 回退到内容检测
+        return detect_session_format(full_path)
+
+    @staticmethod
+    def _parse_codex_filename(filename: str, mtime_str: str) -> Tuple[str, str]:
+        """从 Codex 文件名提取日期和 ID"""
+        match = re.match(r'rollout-(\d{4}-\d{2}-\d{2})T[\d-]+-([a-f0-9-]+)\.jsonl', filename)
+        if match:
+            return match.group(1), match.group(2)[:8]
+        return mtime_str[:10], filename[:8]
+
+    @staticmethod
+    def _parse_claude_filename(filename: str, mtime_str: str) -> Tuple[str, str]:
+        """从 Claude Code 文件名提取日期和 ID"""
+        # Claude Code 文件名格式：{uuid}.jsonl
+        uuid_match = re.match(r'([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\.jsonl', filename)
+        if uuid_match:
+            return mtime_str[:10], uuid_match.group(1)[:8]
+        return mtime_str[:10], filename[:8]
+
+    @staticmethod
+    def _extract_project_path(root: str) -> Optional[str]:
+        """从 Claude Code 目录路径中提取项目路径"""
+        claude_projects_dir = os.path.expanduser("~/.claude/projects/")
+        if root.startswith(claude_projects_dir):
+            encoded = root[len(claude_projects_dir):].rstrip('/')
+            if encoded:
+                return decode_claude_project_path(encoded)
+        return None
+
     def parse_session_jsonl(self, file_path: str) -> List[Dict[str, Any]]:
-        """
-        解析 JSONL 格式的会话文件
-
-        Args:
-            file_path: 会话文件路径
-
-        Returns:
-            解析后的行列表
-        """
+        """解析 JSONL 格式的会话文件"""
         lines = []
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -103,29 +158,18 @@ class SessionParser:
                         continue
         except Exception as e:
             raise ValueError(f"读取文件失败: {file_path}\n{e}")
-
         return lines
 
     def read_last_n_bytes(self, file_path: str, n: int = 50000) -> List[Dict[str, Any]]:
-        """
-        读取文件最后 N 字节并解析
-
-        Args:
-            file_path: 文件路径
-            n: 字节数
-
-        Returns:
-            解析后的行列表
-        """
+        """读取文件最后 N 字节并解析"""
         try:
             with open(file_path, 'rb') as f:
-                f.seek(0, 2)  # 移到文件末尾
+                f.seek(0, 2)
                 file_size = f.tell()
                 start = max(0, file_size - n)
                 f.seek(start)
                 content = f.read().decode('utf-8', errors='ignore')
 
-            # 解析每一行
             lines = []
             for line_num, line in enumerate(content.split('\n'), 1):
                 line = line.strip()
@@ -142,16 +186,10 @@ class SessionParser:
             raise ValueError(f"读取文件失败: {file_path}\n{e}")
 
 
+# ─── 向后兼容的模块级函数（Codex 格式专用） ─────────────────────────────────────
+
 def get_assistant_messages(lines: List[Dict[str, Any]]) -> List[Tuple[int, Dict[str, Any]]]:
-    """
-    从 JSONL 行中提取助手消息
-
-    Args:
-        lines: JSONL 行列表
-
-    Returns:
-        [(行索引, 消息数据), ...]
-    """
+    """从 Codex JSONL 行中提取助手消息"""
     messages = []
     for idx, line in enumerate(lines):
         if line.get('type') == 'response_item':
@@ -162,15 +200,7 @@ def get_assistant_messages(lines: List[Dict[str, Any]]) -> List[Tuple[int, Dict[
 
 
 def get_reasoning_items(lines: List[Dict[str, Any]]) -> List[Tuple[int, Dict[str, Any]]]:
-    """
-    从 JSONL 行中提取推理内容
-
-    Args:
-        lines: JSONL 行列表
-
-    Returns:
-        [(行索引, 推理数据), ...]
-    """
+    """从 Codex JSONL 行中提取推理内容"""
     items = []
     for idx, line in enumerate(lines):
         if line.get('type') == 'response_item':
@@ -181,53 +211,30 @@ def get_reasoning_items(lines: List[Dict[str, Any]]) -> List[Tuple[int, Dict[str
 
 
 def extract_text_content(message_line: Dict[str, Any]) -> str:
-    """
-    从消息行中提取文本内容
-
-    Args:
-        message_line: JSONL 消息行
-
-    Returns:
-        文本内容
-    """
+    """从 Codex 消息行中提取文本内容"""
     payload = message_line.get('payload', {})
     content = payload.get('content', [])
-
     if isinstance(content, str):
         return content
-
     if isinstance(content, list):
         texts = []
         for item in content:
             if isinstance(item, dict) and item.get('type') == 'output_text':
                 texts.append(item.get('text', ''))
         return '\n'.join(texts)
-
     return ''
 
 
 def update_text_content(message_line: Dict[str, Any], new_text: str) -> Dict[str, Any]:
-    """
-    更新消息行的文本内容
-
-    Args:
-        message_line: JSONL 消息行
-        new_text: 新的文本内容
-
-    Returns:
-        更新后的消息行
-    """
+    """更新 Codex 消息行的文本内容"""
     import copy
     updated = copy.deepcopy(message_line)
-
     payload = updated.get('payload', {})
     content = payload.get('content', [])
-
     if isinstance(content, list):
         for item in content:
             if isinstance(item, dict) and item.get('type') == 'output_text':
                 item['text'] = new_text
     else:
         payload['content'] = [{'type': 'output_text', 'text': new_text}]
-
     return updated

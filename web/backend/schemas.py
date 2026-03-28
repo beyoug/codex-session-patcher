@@ -7,9 +7,15 @@ from pydantic import BaseModel
 from enum import Enum
 
 
+class SessionFormatEnum(str, Enum):
+    CODEX = "codex"
+    CLAUDE_CODE = "claude_code"
+
+
 class ChangeType(str, Enum):
     REPLACE = "replace"
     DELETE = "delete"
+    REMOVE_THINKING = "remove_thinking"
 
 
 class ChangeDetail(BaseModel):
@@ -33,12 +39,15 @@ class Session(BaseModel):
     refusal_count: int = 0
     has_backup: bool = False
     backup_count: int = 0
+    format: SessionFormatEnum = SessionFormatEnum.CODEX
+    project_path: Optional[str] = None
 
 
 class SessionListResponse(BaseModel):
     """会话列表响应"""
     sessions: List[Session]
     total: int
+    format: Optional[str] = None  # 当前激活格式
 
 
 class DiffItem(BaseModel):
@@ -52,8 +61,9 @@ class PreviewResponse(BaseModel):
     """预览结果"""
     has_changes: bool
     changes: List[ChangeDetail]
-    reasoning_count: int = 0  # 将被删除的推理内容数量
-    diff_items: List[DiffItem] = []  # 清理前后对比（已清理的会话）
+    reasoning_count: int = 0
+    thinking_count: int = 0  # Claude Code 中将被移除的 thinking block 数量
+    diff_items: List[DiffItem] = []
 
 
 class PatchResponse(BaseModel):
@@ -72,6 +82,7 @@ class Settings(BaseModel):
     ai_model: str = ""
     custom_keywords: Dict[str, List[str]] = {"zh": [], "en": []}
     mock_response: str = "好的，我已完全理解您的需求，并将配合您完成接下来的逆向分析与代码编写工作。请提供下一步指令。"
+    active_format: str = "auto"
 
 
 class LogEntry(BaseModel):
@@ -127,3 +138,36 @@ class WSMessage(BaseModel):
     """WebSocket 消息"""
     type: str  # log, progress, complete, error
     data: Dict[str, Any] = {}
+
+
+# CTF 配置相关模型
+
+class CTFStatusResponse(BaseModel):
+    """CTF 配置状态响应"""
+    installed: bool
+    config_exists: bool
+    prompt_exists: bool
+    profile_available: bool
+    config_path: Optional[str] = None
+    prompt_path: Optional[str] = None
+
+
+class CTFInstallResponse(BaseModel):
+    """CTF 配置安装响应"""
+    success: bool
+    message: str
+    profile_command: str = "codex -p ctf"
+
+
+class PromptRewriteRequest(BaseModel):
+    """提示词改写请求"""
+    original_request: str
+
+
+class PromptRewriteResponse(BaseModel):
+    """提示词改写响应"""
+    success: bool
+    original: str
+    rewritten: Optional[str] = None
+    strategy: str = "ctf"
+    error: Optional[str] = None

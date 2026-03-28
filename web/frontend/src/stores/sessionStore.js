@@ -10,12 +10,12 @@ export const useSessionStore = defineStore('session', () => {
   const previewLoading = ref(false)
   const aiRewrite = ref(null)
   const aiRewriteLoading = ref(false)
+  const activeFormat = ref('auto') // 'auto' | 'codex' | 'claude_code'
 
   async function fetchSessions(checkRefusal = true) {
     loading.value = true
     try {
-      // 加载会话列表，可选检测拒绝内容
-      const data = await api.getSessions(!checkRefusal)
+      const data = await api.getSessions(!checkRefusal, activeFormat.value)
       sessions.value = data.sessions
 
       // 自动选中最新会话
@@ -29,17 +29,23 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
+  function setFormat(format) {
+    activeFormat.value = format
+    selectedId.value = null
+    preview.value = null
+    aiRewrite.value = null
+    fetchSessions()
+  }
+
   async function selectSession(id) {
     selectedId.value = id
     preview.value = null
     aiRewrite.value = null
 
-    // 获取会话详情（包含拒绝检测）
     previewLoading.value = true
     try {
       // 先获取会话详情（检测拒绝）
       const sessionDetail = await api.getSession(id, true)
-      // 更新会话列表中的拒绝状态
       const idx = sessions.value.findIndex(s => s.id === id)
       if (idx >= 0) {
         sessions.value[idx] = sessionDetail
@@ -76,7 +82,6 @@ export const useSessionStore = defineStore('session', () => {
       const data = await api.aiRewriteSession(id || selectedId.value)
       if (data.success) {
         aiRewrite.value = data
-        // 更新预览中所有匹配的 changes
         if (preview.value && preview.value.changes.length > 0 && data.items) {
           for (const item of data.items) {
             const change = preview.value.changes.find(c => c.line_num === item.line_num)
@@ -97,7 +102,6 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function patchSession(id) {
-    // 构建按行号的替换列表
     let replacements = null
     if (aiRewrite.value?.items?.length > 0) {
       replacements = aiRewrite.value.items.map(item => ({
@@ -150,13 +154,15 @@ export const useSessionStore = defineStore('session', () => {
     previewLoading,
     aiRewrite,
     aiRewriteLoading,
+    activeFormat,
     fetchSessions,
+    setFormat,
     selectSession,
     previewSession,
     requestAIRewrite,
     patchSession,
     listBackups,
     restoreSession,
-    getSelectedSession
+    getSelectedSession,
   }
 })
