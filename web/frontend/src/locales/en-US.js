@@ -29,7 +29,7 @@ export default {
   // Navigation
   nav: {
     sessions: 'Sessions',
-    enhance: 'Prompt Enhance',
+    enhance: 'CTF/Pentest',
     settings: 'Settings',
     help: 'Help',
   },
@@ -113,7 +113,7 @@ export default {
 
   // Prompt Enhance
   enhance: {
-    title: 'Prompt Enhancement',
+    title: 'CTF/Pentest Mode',
     ctfMode: 'CTF/Penetration Mode',
     ctfDesc: 'Inject security testing context to reduce refusal rate',
     ctfInstalled: 'Installed',

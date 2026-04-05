@@ -29,7 +29,7 @@ export default {
   // 导航
   nav: {
     sessions: '会话管理',
-    enhance: '提示词增强',
+    enhance: 'CTF/渗透模式',
     settings: '设置',
     help: '帮助',
   },
@@ -113,7 +113,7 @@ export default {
 
   // 提示词增强
   enhance: {
-    title: '提示词增强',
+    title: 'CTF/渗透模式',
     ctfMode: 'CTF/渗透模式',
     ctfDesc: '注入安全测试上下文，降低被拒绝概率',
     ctfInstalled: '已安装',
